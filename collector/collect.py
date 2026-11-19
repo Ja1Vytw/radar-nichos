@@ -8,12 +8,12 @@ usando a YouTube Data API v3 (chave gratuita). Gera:
 Uso:
   YT_API_KEY=xxxx python collector/collect.py
 """
-import json, os, sys, time, urllib.parse, urllib.request
+import html, json, os, sys, time, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 API = "https://www.googleapis.com/youtube/v3/"
-QUOTA = {"search": 100, "channels": 1, "playlistItems": 1}
+QUOTA = {"search": 100, "channels": 1, "playlistItems": 1, "videos": 1}
 
 
 class YouTube:
@@ -46,6 +46,25 @@ def parse(ts):
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
+STOP = {
+    "pt": {"como", "você", "não", "uma", "para", "isso", "por", "que", "é", "do", "da", "esse", "funciona"},
+    "es": {"cómo", "como", "una", "para", "que", "por", "del", "los", "las", "es", "nadie", "funciona", "qué"},
+    "en": {"the", "how", "you", "your", "what", "is", "a", "of", "and", "for", "to", "works", "why"},
+    "de": {"der", "die", "das", "und", "wie", "ist", "nicht", "ein", "eine", "für", "mit", "zum"},
+    "fr": {"le", "la", "les", "et", "comment", "est", "une", "des", "pour", "du", "ta", "vraiment"},
+}
+
+
+def guess_lang(text):
+    """Palpite simples pelo titulo quando o video nao informa o idioma."""
+    if any("\u0900" <= ch <= "\u097f" or "\u0600" <= ch <= "\u06ff" for ch in text):
+        return "outro"
+    words = {w.strip("?!.,:;()|#\"'¿¡").lower() for w in text.split()}
+    scores = {lang: len(words & sw) for lang, sw in STOP.items()}
+    best = max(scores, key=scores.get)
+    return best if scores[best] >= 2 else None
+
+
 def chunks(seq, n):
     for i in range(0, len(seq), n):
         yield seq[i:i + n]
@@ -57,22 +76,23 @@ def collect(yt, cfg, now):
 
     # 1) buscar videos recentes mais vistos por nicho x idioma
     for niche in cfg["niches"]:
-        for lang, q in niche["queries"].items():
-            meta = cfg["languages"][lang]
-            params = dict(part="snippet", type="video", q=q, order="viewCount",
-                          publishedAfter=iso(since), maxResults=cfg["results_per_search"],
-                          relevanceLanguage=lang, regionCode=meta["region"])
-            dur = niche.get("duration") or ("short" if niche["format"] == "shorts" else "medium")
-            if dur != "any":
-                params["videoDuration"] = dur
-            res = yt.get("search", **params)
-            for it in res.get("items", []):
-                cid = it["snippet"]["channelId"]
-                if cid not in found:
-                    found[cid] = {"niche": niche["id"], "lang": lang, "format": niche["format"],
-                                  "sample_title": it["snippet"]["title"],
-                                  "sample_video": it["id"]["videoId"]}
-            print(f"  busca {niche['id']}/{lang}: {len(res.get('items', []))} videos", flush=True)
+        for lang, qs in niche["queries"].items():
+          meta = cfg["languages"][lang]
+          for q in ([qs] if isinstance(qs, str) else qs):
+              params = dict(part="snippet", type="video", q=q, order="viewCount",
+                            publishedAfter=iso(since), maxResults=cfg["results_per_search"],
+                            relevanceLanguage=lang, regionCode=meta["region"])
+              dur = niche.get("duration") or ("short" if niche["format"] == "shorts" else "medium")
+              if dur != "any":
+                  params["videoDuration"] = dur
+              res = yt.get("search", **params)
+              for it in res.get("items", []):
+                  cid = it["snippet"]["channelId"]
+                  if cid not in found:
+                      found[cid] = {"niche": niche["id"], "lang": lang, "format": niche["format"],
+                                    "sample_title": html.unescape(it["snippet"]["title"]),
+                                    "sample_video": it["id"]["videoId"]}
+              print(f"  busca {niche['id']}/{lang} '{q}': {len(res.get('items', []))} videos", flush=True)
 
     # 2) dados dos canais (50 por chamada)
     channels = {}
@@ -86,7 +106,11 @@ def collect(yt, cfg, now):
     for cid, c in channels.items():
         st = c.get("statistics", {})
         vids = int(st.get("videoCount", 0) or 0)
-        if vids == 0 or vids > cfg["max_videos_per_channel"]:
+        if vids < cfg.get("min_videos", 1) or vids > cfg["max_videos_per_channel"]:
+            continue
+        niche_cfg = next(n for n in cfg["niches"] if n["id"] == found[cid]["niche"])
+        text = (c["snippet"]["title"] + " " + found[cid]["sample_title"]).lower()
+        if any(term in text for term in niche_cfg.get("exclude", [])):
             continue
         uploads = c["contentDetails"]["relatedPlaylists"]["uploads"]
         dates, token = [], None
@@ -113,11 +137,13 @@ def collect(yt, cfg, now):
         subs = None if st.get("hiddenSubscriberCount") else int(st.get("subscriberCount", 0) or 0)
         out.append({
             "id": cid,
-            "name": c["snippet"]["title"],
+            "name": html.unescape(c["snippet"]["title"]),
             "url": f"https://www.youtube.com/channel/{cid}",
             "thumb": c["snippet"]["thumbnails"].get("medium", c["snippet"]["thumbnails"]["default"])["url"],
             "niche": info["niche"],
             "lang": info["lang"],
+            "lang_source": "busca",
+            "sample_id": info["sample_video"],
             "format": info["format"],
             "first_video": first.date().isoformat(),
             "age_days": age,
@@ -129,6 +155,24 @@ def collect(yt, cfg, now):
             "sample_title": info["sample_title"],
             "sample_url": f"https://www.youtube.com/watch?v={info['sample_video']}",
         })
+
+    # idioma real: idioma do audio/metadados do video em alta (a busca so indica o mercado)
+    for group in chunks(out, 50):
+        res = yt.get("videos", part="snippet", id=",".join(x["sample_id"] for x in group), maxResults=50)
+        langs = {v["id"]: (v["snippet"].get("defaultAudioLanguage") or v["snippet"].get("defaultLanguage") or "")
+                 for v in res.get("items", [])}
+        for x in group:
+            code = langs.get(x["sample_id"], "").split("-")[0].lower()
+            if code and code != "zxx":
+                x["lang"], x["lang_source"] = code, "audio"
+            else:
+                g = guess_lang(x["sample_title"] + " " + x["name"])
+                if g:
+                    x["lang"], x["lang_source"] = g, "titulo"
+    if cfg.get("only_configured_languages"):
+        out = [x for x in out if x["lang"] in cfg["languages"]]
+    for x in out:
+        x.pop("sample_id", None)
 
     # nota de 0 a 100: views/dia relativo ao melhor do mesmo formato
     for fmt in ("long", "shorts"):
