@@ -1,0 +1,66 @@
+{
+  "lookback_days": 30,
+  "max_channel_age_days": 60,
+  "min_avg_views_long": 5000,
+  "min_avg_views_shorts": 50000,
+  "max_videos_per_channel": 60,
+  "results_per_search": 50,
+  "languages": {
+    "pt": { "region": "BR", "label": "Português" },
+    "es": { "region": "MX", "label": "Español" },
+    "en": { "region": "US", "label": "English" },
+    "de": { "region": "DE", "label": "Deutsch" },
+    "fr": { "region": "FR", "label": "Français" }
+  },
+  "niches": [
+    {
+      "id": "jazz-fundo",
+      "name": "Música de fundo (jazz / lofi)",
+      "format": "long",
+      "duration": "long",
+      "queries": {
+        "pt": "jazz para relaxar",
+        "es": "jazz para relajarse",
+        "en": "relaxing jazz music",
+        "de": "entspannende jazz musik",
+        "fr": "jazz relaxant"
+      }
+    },
+    {
+      "id": "explicativo-animado",
+      "name": "Explicativos animados (como funciona)",
+      "format": "shorts",
+      "queries": {
+        "pt": "como funciona animação",
+        "es": "cómo funciona animación",
+        "en": "how it works animation",
+        "de": "wie funktioniert animation",
+        "fr": "comment ça marche animation"
+      }
+    },
+    {
+      "id": "games-lista",
+      "name": "Games (listas e curiosidades)",
+      "format": "long",
+      "queries": {
+        "pt": "jogos curiosidades",
+        "es": "curiosidades videojuegos",
+        "en": "video game facts",
+        "de": "videospiele fakten",
+        "fr": "jeux vidéo anecdotes"
+      }
+    },
+    {
+      "id": "historia-regional",
+      "name": "História regional / cidades",
+      "format": "long",
+      "queries": {
+        "pt": "história da cidade documentário",
+        "es": "historia de la ciudad documental",
+        "en": "history of the city documentary",
+        "de": "geschichte der stadt doku",
+        "fr": "histoire de la ville documentaire"
+      }
+    }
+  ]
+}
